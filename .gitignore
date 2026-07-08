@@ -11,6 +11,12 @@ triggers/
 # Конфиги с секретами
 config/config.json
 
+# Переменные окружения
+.env
+.env.local
+.env.*
+!.env.example
+
 # PowerShell
 *.ps1xml
 
