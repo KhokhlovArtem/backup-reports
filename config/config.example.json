@@ -1,0 +1,12 @@
+{
+  "BackupPath": "E:\\share\\backup",
+  "ExcludeFolders": ["LongTermCopy", "!Основание"],
+  "Reports": {
+    "Daily": { "DaysThreshold": 10 },
+    "Weekly": { "DaysThreshold": 45 },
+    "Monthly": { "DaysThreshold": 60 }
+  },
+  "OutputPath": ".\\reports",
+  "LogPath": ".\\logs",
+  "TriggerPath": ".\\triggers"
+}
