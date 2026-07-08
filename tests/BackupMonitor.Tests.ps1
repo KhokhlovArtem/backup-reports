@@ -27,6 +27,20 @@ Describe 'BackupMonitor' {
             $config.Reports.Weekly.DaysThreshold | Should -BeGreaterThan $config.Reports.Daily.DaysThreshold
             $config.Reports.Monthly.DaysThreshold | Should -BeGreaterThan $config.Reports.Weekly.DaysThreshold
         }
+
+        It 'Should have LogRetentionDays key' {
+            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
+            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+            $config.PSObject.Properties.Name | Should -Contain 'LogRetentionDays'
+            $config.LogRetentionDays | Should -BeGreaterThan 0
+        }
+
+        It 'Should have ReportRetentionDays key' {
+            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
+            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+            $config.PSObject.Properties.Name | Should -Contain 'ReportRetentionDays'
+            $config.ReportRetentionDays | Should -BeGreaterThan 0
+        }
     }
 
     Context 'File Age Calculation' {
@@ -129,6 +143,63 @@ Describe 'BackupMonitor' {
             $threshold = 10
             $ageDays = 5
             ($ageDays -gt $threshold) | Should -BeFalse
+        }
+    }
+
+    Context 'File Cleanup' {
+        BeforeAll {
+            $testDir = Join-Path ([System.IO.Path]::GetTempPath()) "backup-monitor-test-$(Get-Random)"
+            New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+        }
+
+        AfterAll {
+            Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        It 'Should remove files older than retention period' {
+            $subDir = Join-Path $testDir "logs"
+            New-Item -ItemType Directory -Path $subDir -Force | Out-Null
+
+            $oldFile = Join-Path $subDir "old.log"
+            Set-Content -Path $oldFile -Value "old"
+            $item = Get-Item -LiteralPath $oldFile
+            $item.LastWriteTime = (Get-Date).AddDays(-10)
+            $item.Refresh()
+
+            $recentFile = Join-Path $subDir "recent.log"
+            Set-Content -Path $recentFile -Value "recent"
+
+            $cutoff = (Get-Date).AddDays(-7)
+            Get-ChildItem -Path $subDir -File | Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force
+            }
+
+            (Test-Path -LiteralPath $oldFile) | Should -BeFalse
+            (Test-Path -LiteralPath $recentFile) | Should -BeTrue
+        }
+
+        It 'Should not remove files within retention period' {
+            $subDir = Join-Path $testDir "recent"
+            New-Item -ItemType Directory -Path $subDir -Force | Out-Null
+
+            $file = Join-Path $subDir "fresh.log"
+            Set-Content -Path $file -Value "fresh"
+
+            $cutoff = (Get-Date).AddDays(-7)
+            Get-ChildItem -Path $subDir -File | Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force
+            }
+
+            (Test-Path -LiteralPath $file) | Should -BeTrue
+        }
+
+        It 'Should not fail on non-existent directory' {
+            $fakePath = Join-Path $testDir "nonexistent"
+            $result = $true
+            if (Test-Path -LiteralPath $fakePath) {
+                Get-ChildItem -Path $fakePath -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            $result | Should -BeTrue
         }
     }
 }

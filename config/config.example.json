@@ -8,5 +8,7 @@
   },
   "OutputPath": ".\\reports",
   "LogPath": ".\\logs",
-  "TriggerPath": ".\\triggers"
+  "TriggerPath": ".\\triggers",
+  "LogRetentionDays": 7,
+  "ReportRetentionDays": 7
 }
