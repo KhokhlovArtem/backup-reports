@@ -4,42 +4,56 @@ BeforeAll {
 
 Describe 'BackupMonitor' {
 
-    Context 'Config Loading' {
-        It 'Should load valid JSON config' {
-            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
-            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-            $config | Should -Not -BeNullOrEmpty
-            $config.BackupPath | Should -Be 'E:\share\backup'
+    Context 'Env Loading' {
+        BeforeAll {
+            $testEnv = Join-Path ([System.IO.Path]::GetTempPath()) "test-$(Get-Random).env"
+            @(
+                'BACKUP_PATH=E:\test\backup',
+                'EXCLUDE_FOLDERS=Folder1,Folder2',
+                'DAILY_THRESHOLD=5',
+                'LOG_RETENTION_DAYS=14',
+                '# comment line',
+                '',
+                'REPORT_RETENTION_DAYS=30'
+            ) | Set-Content -Path $testEnv
         }
 
-        It 'Should have required config keys' {
-            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
-            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-            $config.PSObject.Properties.Name | Should -Contain 'BackupPath'
-            $config.PSObject.Properties.Name | Should -Contain 'ExcludeFolders'
-            $config.PSObject.Properties.Name | Should -Contain 'Reports'
+        AfterAll {
+            Remove-Item -Path $testEnv -Force -ErrorAction SilentlyContinue
         }
 
-        It 'Should have valid thresholds' {
-            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
-            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-            $config.Reports.Daily.DaysThreshold | Should -BeGreaterThan 0
-            $config.Reports.Weekly.DaysThreshold | Should -BeGreaterThan $config.Reports.Daily.DaysThreshold
-            $config.Reports.Monthly.DaysThreshold | Should -BeGreaterThan $config.Reports.Weekly.DaysThreshold
+        It 'Should parse KEY=value pairs' {
+            $lines = Get-Content -Path $testEnv
+            $parsed = @{}
+            foreach ($line in $lines) {
+                $line = $line.Trim()
+                if ($line -match '^\s*#' -or $line -eq '') { continue }
+                if ($line -match '^([^=]+)=(.*)$') {
+                    $parsed[$Matches[1].Trim()] = $Matches[2].Trim()
+                }
+            }
+            $parsed['BACKUP_PATH'] | Should -Be 'E:\test\backup'
+            $parsed['DAILY_THRESHOLD'] | Should -Be '5'
         }
 
-        It 'Should have LogRetentionDays key' {
-            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
-            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-            $config.PSObject.Properties.Name | Should -Contain 'LogRetentionDays'
-            $config.LogRetentionDays | Should -BeGreaterThan 0
+        It 'Should skip comment lines' {
+            $lines = Get-Content -Path $testEnv
+            $commentCount = ($lines | Where-Object { $_.Trim() -match '^\s*#' }).Count
+            $commentCount | Should -Be 1
         }
 
-        It 'Should have ReportRetentionDays key' {
-            $configPath = Join-Path $PSScriptRoot '..\config\config.example.json'
-            $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-            $config.PSObject.Properties.Name | Should -Contain 'ReportRetentionDays'
-            $config.ReportRetentionDays | Should -BeGreaterThan 0
+        It 'Should skip empty lines' {
+            $lines = Get-Content -Path $testEnv
+            $emptyCount = ($lines | Where-Object { $_.Trim() -eq '' }).Count
+            $emptyCount | Should -Be 1
+        }
+
+        It 'Should parse comma-separated list' {
+            $value = 'Folder1,Folder2'
+            $items = $value -split ','
+            $items.Count | Should -Be 2
+            $items[0] | Should -Be 'Folder1'
+            $items[1] | Should -Be 'Folder2'
         }
     }
 

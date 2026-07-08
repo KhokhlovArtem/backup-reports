@@ -8,9 +8,6 @@ reports/
 # Триггеры
 triggers/
 
-# Конфиги с секретами
-config/config.json
-
 # Переменные окружения
 .env
 .env.local

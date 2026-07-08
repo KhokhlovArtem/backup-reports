@@ -7,8 +7,7 @@ PowerShell-скрипт мониторинга и отчётности по бэ
 - Сканирование директории бэкапов с исключением указанных папок
 - Генерация 3 типов отчётов: Daily (>10 дней), Weekly (>45 дней), Monthly (>60 дней)
 - Создание триггер-файлов с количеством найденных файлов
-- Конфигурация через JSON-файл
-- Поддержка параметров командной строки
+- Конфигурация через `.env` файл
 - Логирование с уровнями INFO, WARN, ERROR, SUCCESS, TRIGGER
 - Коды возврата: 0 (успех), 1 (ошибка), 10 (инцидент)
 
@@ -22,41 +21,45 @@ PowerShell-скрипт мониторинга и отчётности по бэ
 ```bash
 git clone https://github.com/your-org/backup-reports.git
 cd backup-reports
-Copy-Item config\config.example.json config\config.json
-# Отредактируй config.json под свои нужды
+Copy-Item .env.example .env
+# Отредактируй .env под свои нужды
 ```
 
 ## Использование
 
 ```powershell
-# Запуск с конфигом по умолчанию
 .\src\BackupMonitor.ps1
-
-# Указание пути к конфигу
-.\src\BackupMonitor.ps1 -Config .\config\config.json
-
-# Справка
+.\src\BackupMonitor.ps1 -EnvFile C:\path\to\.env
 .\src\BackupMonitor.ps1 -Help
 ```
 
 ## Конфигурация
 
-Файл `config/config.json`:
+Все переменные задаются в `.env` файле:
 
-```json
-{
-  "BackupPath": "E:\\share\\backup",
-  "ExcludeFolders": ["LongTermCopy", "!Основание"],
-  "Reports": {
-    "Daily": { "DaysThreshold": 10 },
-    "Weekly": { "DaysThreshold": 45 },
-    "Monthly": { "DaysThreshold": 60 }
-  },
-  "OutputPath": ".\\reports",
-  "LogPath": ".\\logs",
-  "TriggerPath": ".\\triggers"
-}
+```env
+# Путь к бэкапам
+BACKUP_PATH=E:\share\backup
+
+# Исключённые папки (через запятую)
+EXCLUDE_FOLDERS=LongTermCopy,!Основание
+
+# Пороговые значения (дни)
+DAILY_THRESHOLD=10
+WEEKLY_THRESHOLD=45
+MONTHLY_THRESHOLD=60
+
+# Каталоги вывода
+OUTPUT_PATH=.\reports
+LOG_PATH=.\logs
+TRIGGER_PATH=.\triggers
+
+# Хранение (дни)
+LOG_RETENTION_DAYS=7
+REPORT_RETENTION_DAYS=7
 ```
+
+Приоритет: `.env` → дефолтные значения.
 
 ## Коды возврата
 
@@ -71,13 +74,13 @@ Copy-Item config\config.example.json config\config.json
 ```
 backup-reports/
 ├── src/                  # Основной скрипт
-├── config/               # Конфигурация
 ├── tests/                # Pester тесты
 ├── docs/                 # Документация
 ├── .github/workflows/    # GitHub Actions
 ├── logs/                 # Логи (gitignore)
 ├── reports/              # Отчёты (gitignore)
 ├── triggers/             # Триггеры (gitignore)
+├── .env.example          # Пример переменных
 ├── .gitignore
 ├── LICENSE
 └── README.md
