@@ -63,7 +63,8 @@ function Resolve-ProjectPath {
 # НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ (из .env)
 # ==================================================================
 
-$RootPath = Get-EnvValue -Key 'BACKUP_PATH' -DefaultValue 'E:\share\backup'
+$RootPathRaw = Get-EnvValue -Key 'BACKUP_PATH' -DefaultValue 'E:\share\backup'
+$RootPaths = $RootPathRaw -split ';'
 
 $ExcludeFoldersRaw = Get-EnvValue -Key 'EXCLUDE_FOLDERS' -DefaultValue 'LongTermCopy,!Основание'
 $ExcludeFolders = $ExcludeFoldersRaw -split ','
@@ -146,22 +147,16 @@ Remove-OldFiles -Path $OutputDir -RetentionDays $ReportRetentionDays -Label "REP
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==================================================================
 
-function Get-FileInfo {
-    param(
-        [string]$Path,
-        [string]$SearchPattern,
-        [int]$DaysOld,
-        [string]$ReportType
-    )
+function Collect-AllFiles {
+    param([string[]]$Paths)
 
-    $CutoffDate = (Get-Date).AddDays(-$DaysOld)
     $Results = @()
     $TotalScanned = 0
     $TotalExcluded = 0
 
-    Write-Log -Message "Start scanning for $ReportType (pattern: '$SearchPattern', older than $DaysOld days)" -Level "INFO"
+    Write-Log -Message "Start scanning all paths..." -Level "INFO"
 
-    Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue |
+    Get-ChildItem -Path $Paths -Recurse -File -ErrorAction SilentlyContinue |
     ForEach-Object {
         $TotalScanned++
         $filePath = $_.FullName
@@ -177,22 +172,42 @@ function Get-FileInfo {
 
         if ($exclude) { return }
 
-        $containsPattern = $filePath -match $SearchPattern
-        $isOldEnough = $_.LastWriteTime -lt $CutoffDate
-
-        if ($containsPattern -and $isOldEnough) {
-            $Results += [PSCustomObject]@{
-                Type          = $ReportType
-                FULLPATHTOFILE = $filePath
-                SIZE          = $_.Length
-                "DATA change" = $_.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
-                "DATA Create" = $_.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
-            }
+        $Results += [PSCustomObject]@{
+            FULLPATHTOFILE = $filePath
+            SIZE           = $_.Length
+            "DATA change"  = $_.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+            "DATA Create"  = $_.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
+            LastWriteTime  = $_.LastWriteTime
         }
     }
 
-    Write-Log -Message "Scanning completed for $ReportType`: $($Results.Count) files found (scanned: $TotalScanned, excluded: $TotalExcluded)" -Level "INFO"
+    Write-Log -Message "Scanning completed: total $TotalScanned, excluded $TotalExcluded" -Level "INFO"
+    return $Results
+}
 
+function Split-FilesByType {
+    param(
+        [array]$Files,
+        [string]$SearchPattern,
+        [int]$DaysOld,
+        [string]$ReportType
+    )
+
+    $CutoffDate = (Get-Date).AddDays(-$DaysOld)
+
+    $Results = $Files | Where-Object {
+        $_.FULLPATHTOFILE -match $SearchPattern -and $_.LastWriteTime -lt $CutoffDate
+    } | ForEach-Object {
+        [PSCustomObject]@{
+            Type          = $ReportType
+            FULLPATHTOFILE = $_.FULLPATHTOFILE
+            SIZE          = $_.SIZE
+            "DATA change" = $_."DATA change"
+            "DATA Create" = $_."DATA Create"
+        }
+    }
+
+    Write-Log -Message "$ReportType`: $($Results.Count) files found (pattern: '$SearchPattern', older than $DaysOld days)" -Level "INFO"
     return $Results
 }
 
@@ -262,19 +277,26 @@ if ($isAdmin) {
     Write-Log -Message "Warning: Running without Administrator privileges. Some files may be inaccessible." -Level "WARN"
 }
 
-if (!(Test-Path $RootPath)) {
-    Write-Log -Message "Root directory not found: $RootPath" -Level "ERROR"
-    Write-Log -Message "Script terminated" -Level "ERROR"
-    exit 1
+if ($RootPaths.Count -gt 1) {
+    Write-Log -Message "Monitoring $($RootPaths.Count) directories" -Level "INFO"
 }
-Write-Log -Message "Root directory exists: $RootPath" -Level "SUCCESS"
 
-foreach ($folder in $ExcludeFolders) {
-    $folderPath = Join-Path $RootPath $folder
-    if (Test-Path $folderPath) {
-        Write-Log -Message "Excluded folder found: $folderPath" -Level "INFO"
-    } else {
-        Write-Log -Message "Excluded folder not found (skipping): $folderPath" -Level "WARN"
+foreach ($rp in $RootPaths) {
+    $rp = $rp.Trim()
+    if (!(Test-Path $rp)) {
+        Write-Log -Message "Root directory not found: $rp" -Level "ERROR"
+        Write-Log -Message "Script terminated" -Level "ERROR"
+        exit 1
+    }
+    Write-Log -Message "Root directory exists: $rp" -Level "SUCCESS"
+
+    foreach ($folder in $ExcludeFolders) {
+        $folderPath = Join-Path $rp $folder
+        if (Test-Path $folderPath) {
+            Write-Log -Message "Excluded folder found: $folderPath" -Level "INFO"
+        } else {
+            Write-Log -Message "Excluded folder not found (skipping): $folderPath" -Level "WARN"
+        }
     }
 }
 
@@ -292,20 +314,35 @@ if (!(Test-Path $OutputDir)) {
 try {
     Write-Log -Message "Starting data collection..." -Level "INFO"
 
-    $DailyFiles = Get-FileInfo -Path $RootPath -SearchPattern "Daily" -DaysOld $DailyDaysOld -ReportType "Daily"
-    $WeeklyFiles = Get-FileInfo -Path $RootPath -SearchPattern "Weekly" -DaysOld $WeeklyDaysOld -ReportType "Weekly"
-    $MonthlyFiles = Get-FileInfo -Path $RootPath -SearchPattern "Monthly" -DaysOld $MonthlyDaysOld -ReportType "Monthly"
+    $AllFiles = Collect-AllFiles -Paths $RootPaths
+
+    Write-Log -Message "Splitting files by type..." -Level "INFO"
+
+    $FullFiles    = $AllFiles | ForEach-Object {
+        [PSCustomObject]@{
+            Type          = 'Full'
+            FULLPATHTOFILE = $_.FULLPATHTOFILE
+            SIZE          = $_.SIZE
+            "DATA change" = $_."DATA change"
+            "DATA Create" = $_."DATA Create"
+        }
+    }
+
+    $DailyFiles   = Split-FilesByType -Files $AllFiles -SearchPattern "Daily"   -DaysOld $DailyDaysOld   -ReportType "Daily"
+    $WeeklyFiles  = Split-FilesByType -Files $AllFiles -SearchPattern "Weekly"  -DaysOld $WeeklyDaysOld  -ReportType "Weekly"
+    $MonthlyFiles = Split-FilesByType -Files $AllFiles -SearchPattern "Monthly" -DaysOld $MonthlyDaysOld -ReportType "Monthly"
 
     Write-Log -Message "Exporting reports to CSV..." -Level "INFO"
 
-    $DailyCsv = Export-ToCsvFile -Data $DailyFiles -ReportType "Daily" -OutputPath $OutputDir
-    $WeeklyCsv = Export-ToCsvFile -Data $WeeklyFiles -ReportType "Weekly" -OutputPath $OutputDir
+    $FullCsv    = Export-ToCsvFile -Data $FullFiles    -ReportType "Full"    -OutputPath $OutputDir
+    $DailyCsv   = Export-ToCsvFile -Data $DailyFiles   -ReportType "Daily"   -OutputPath $OutputDir
+    $WeeklyCsv  = Export-ToCsvFile -Data $WeeklyFiles  -ReportType "Weekly"  -OutputPath $OutputDir
     $MonthlyCsv = Export-ToCsvFile -Data $MonthlyFiles -ReportType "Monthly" -OutputPath $OutputDir
 
     Write-Log -Message "Creating trigger files..." -Level "INFO"
 
-    $DailyTrigger = Create-TriggerFile -ReportType "Daily" -FileCount $DailyFiles.Count -TriggersPath $TriggersDir
-    $WeeklyTrigger = Create-TriggerFile -ReportType "Weekly" -FileCount $WeeklyFiles.Count -TriggersPath $TriggersDir
+    $DailyTrigger   = Create-TriggerFile -ReportType "Daily"   -FileCount $DailyFiles.Count   -TriggersPath $TriggersDir
+    $WeeklyTrigger  = Create-TriggerFile -ReportType "Weekly"  -FileCount $WeeklyFiles.Count  -TriggersPath $TriggersDir
     $MonthlyTrigger = Create-TriggerFile -ReportType "Monthly" -FileCount $MonthlyFiles.Count -TriggersPath $TriggersDir
 
     # ==================================================================
@@ -318,10 +355,11 @@ try {
     Write-Log -Message "========================================" -Level "INFO"
     Write-Log -Message "SUMMARY" -Level "INFO"
     Write-Log -Message "========================================" -Level "INFO"
-    Write-Log -Message "Daily files found:   $($DailyFiles.Count)" -Level "INFO"
-    Write-Log -Message "Weekly files found:  $($WeeklyFiles.Count)" -Level "INFO"
-    Write-Log -Message "Monthly files found: $($MonthlyFiles.Count)" -Level "INFO"
-    Write-Log -Message "Total files:         $TotalFiles" -Level "INFO"
+    Write-Log -Message "Full files found:   $($FullFiles.Count)" -Level "INFO"
+    Write-Log -Message "Daily files found:  $($DailyFiles.Count)" -Level "INFO"
+    Write-Log -Message "Weekly files found: $($WeeklyFiles.Count)" -Level "INFO"
+    Write-Log -Message "Monthly files found:$($MonthlyFiles.Count)" -Level "INFO"
+    Write-Log -Message "Total (w/o Full):   $TotalFiles" -Level "INFO"
     Write-Log -Message "========================================" -Level "INFO"
 
     if ($HasIncidents) {
@@ -342,8 +380,9 @@ try {
 
     Write-Log -Message "========================================" -Level "INFO"
 
-    if ($DailyCsv) { Write-Log -Message "Daily CSV:   $DailyCsv" -Level "SUCCESS" }
-    if ($WeeklyCsv) { Write-Log -Message "Weekly CSV:  $WeeklyCsv" -Level "SUCCESS" }
+    if ($FullCsv)    { Write-Log -Message "Full CSV:    $FullCsv"    -Level "SUCCESS" }
+    if ($DailyCsv)   { Write-Log -Message "Daily CSV:   $DailyCsv"   -Level "SUCCESS" }
+    if ($WeeklyCsv)  { Write-Log -Message "Weekly CSV:  $WeeklyCsv"  -Level "SUCCESS" }
     if ($MonthlyCsv) { Write-Log -Message "Monthly CSV: $MonthlyCsv" -Level "SUCCESS" }
 
     Write-Log -Message "Daily Trigger:   $DailyTrigger" -Level "INFO"

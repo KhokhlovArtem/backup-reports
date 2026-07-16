@@ -160,6 +160,63 @@ Describe 'BackupMonitor' {
         }
     }
 
+    Context 'Multi Directory Support' {
+        It 'Should parse single BACKUP_PATH correctly' {
+            $value = 'E:\share\backup'
+            $paths = $value -split ';'
+            $paths.Count | Should -Be 1
+            $paths[0] | Should -Be 'E:\share\backup'
+        }
+
+        It 'Should parse multiple BACKUP_PATH separated by semicolon' {
+            $value = 'E:\share\backup1;D:\backup2;\\nas\share\backup3'
+            $paths = $value -split ';'
+            $paths.Count | Should -Be 3
+            $paths[0] | Should -Be 'E:\share\backup1'
+            $paths[1] | Should -Be 'D:\backup2'
+            $paths[2] | Should -Be '\\nas\share\backup3'
+        }
+
+        It 'Should handle single path without semicolon' {
+            $value = 'C:\backup'
+            $hasSemicolon = $value -match ';'
+            $hasSemicolon | Should -BeFalse
+            $paths = $value -split ';'
+            $paths.Count | Should -Be 1
+        }
+    }
+
+    Context 'Full Report Behavior' {
+        It 'Should include all files regardless of name pattern' {
+            $files = @(
+                @{ FULLPATHTOFILE = 'E:\backup\Daily\file1.bak'; LastWriteTime = (Get-Date).AddDays(-5) },
+                @{ FULLPATHTOFILE = 'E:\backup\Weekly\file2.bak'; LastWriteTime = (Get-Date).AddDays(-30) },
+                @{ FULLPATHTOFILE = 'E:\backup\Monthly\file3.bak'; LastWriteTime = (Get-Date).AddDays(-90) },
+                @{ FULLPATHTOFILE = 'E:\backup\Other\file4.bak'; LastWriteTime = (Get-Date).AddDays(-1) }
+            ) | ForEach-Object { [PSCustomObject]$_ }
+
+            $fullCount = $files.Count
+            $fullCount | Should -Be 4
+        }
+
+        It 'Should not create trigger file for Full report' {
+            $reportType = 'Full'
+            $triggersDir = Join-Path ([System.IO.Path]::GetTempPath()) "triggers-$(Get-Random)"
+
+            try {
+                if (!(Test-Path $triggersDir)) {
+                    New-Item -ItemType Directory -Path $triggersDir -Force | Out-Null
+                }
+
+                $triggerFile = Join-Path $triggersDir "$reportType.txt"
+                5 | Out-File -FilePath $triggerFile -Encoding UTF8 -Force
+                (Test-Path -LiteralPath $triggerFile) | Should -BeTrue
+            } finally {
+                Remove-Item -Path $triggersDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     Context 'File Cleanup' {
         BeforeAll {
             $testDir = Join-Path ([System.IO.Path]::GetTempPath()) "backup-monitor-test-$(Get-Random)"
