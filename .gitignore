@@ -22,6 +22,9 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
+# Результаты тестов
+test-results.xml
+
 # IDE
 .vscode/
 .idea/
